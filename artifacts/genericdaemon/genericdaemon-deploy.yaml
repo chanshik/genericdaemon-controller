@@ -1,0 +1,17 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: genericdaemon-controller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: genericdaemon
+  template:
+    metadata:
+      labels:
+        app: genericdaemon
+    spec:
+      containers:
+        - name: genericdaemon
+          image: "chanshik/genericdaemon:latest"

@@ -37,14 +37,14 @@ import (
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog"
 
-	samplev1alpha1 "k8s.io/sample-controller/pkg/apis/samplecontroller/v1alpha1"
-	clientset "k8s.io/sample-controller/pkg/client/clientset/versioned"
-	samplescheme "k8s.io/sample-controller/pkg/client/clientset/versioned/scheme"
-	informers "k8s.io/sample-controller/pkg/client/informers/externalversions/samplecontroller/v1alpha1"
-	listers "k8s.io/sample-controller/pkg/client/listers/samplecontroller/v1alpha1"
+	genericdaemonv1beta1 "github.com/chanshik/genericdaemon-controller/pkg/apis/genericdaemon/v1beta1"
+	clientset "github.com/chanshik/genericdaemon-controller/pkg/client/clientset/versioned"
+	samplescheme "github.com/chanshik/genericdaemon-controller/pkg/client/clientset/versioned/scheme"
+	informers "github.com/chanshik/genericdaemon-controller/pkg/client/informers/externalversions/genericdaemon/v1beta1"
+	listers "github.com/chanshik/genericdaemon-controller/pkg/client/listers/genericdaemon/v1beta1"
 )
 
-const controllerAgentName = "sample-controller"
+const controllerAgentName = "genericdaemon-controller"
 
 const (
 	// SuccessSynced is used as part of the Event 'reason' when a Foo is synced
@@ -55,10 +55,10 @@ const (
 
 	// MessageResourceExists is the message used for Events when a resource
 	// fails to sync due to a Deployment already existing
-	MessageResourceExists = "Resource %q already exists and is not managed by Foo"
-	// MessageResourceSynced is the message used for an Event fired when a Foo
+	MessageResourceExists = "Resource %q already exists and is not managed by Genericdaemon"
+	// MessageResourceSynced is the message used for an Event fired when a Genericdaemon
 	// is synced successfully
-	MessageResourceSynced = "Foo synced successfully"
+	MessageResourceSynced = "Genericdaemon synced successfully"
 )
 
 // Controller is the controller implementation for Foo resources
@@ -68,10 +68,14 @@ type Controller struct {
 	// sampleclientset is a clientset for our own API group
 	sampleclientset clientset.Interface
 
-	deploymentsLister appslisters.DeploymentLister
-	deploymentsSynced cache.InformerSynced
-	foosLister        listers.FooLister
-	foosSynced        cache.InformerSynced
+	//deploymentsLister appslisters.DeploymentLister
+	//deploymentsSynced cache.InformerSynced
+
+	daemonsetsLister appslisters.DaemonSetLister
+	daemonsetsSynced cache.InformerSynced
+
+	genericdaemonsLister listers.GenericdaemonLister
+	genericdaemonsSynced cache.InformerSynced
 
 	// workqueue is a rate limited work queue. This is used to queue work to be
 	// processed instead of performing it as soon as a change happens. This
@@ -88,8 +92,8 @@ type Controller struct {
 func NewController(
 	kubeclientset kubernetes.Interface,
 	sampleclientset clientset.Interface,
-	deploymentInformer appsinformers.DeploymentInformer,
-	fooInformer informers.FooInformer) *Controller {
+	daemonSetInformer appsinformers.DaemonSetInformer,
+	genericdaemonInformer informers.GenericdaemonInformer) *Controller {
 
 	// Create event broadcaster
 	// Add sample-controller types to the default Kubernetes Scheme so Events can be
@@ -102,22 +106,22 @@ func NewController(
 	recorder := eventBroadcaster.NewRecorder(scheme.Scheme, corev1.EventSource{Component: controllerAgentName})
 
 	controller := &Controller{
-		kubeclientset:     kubeclientset,
-		sampleclientset:   sampleclientset,
-		deploymentsLister: deploymentInformer.Lister(),
-		deploymentsSynced: deploymentInformer.Informer().HasSynced,
-		foosLister:        fooInformer.Lister(),
-		foosSynced:        fooInformer.Informer().HasSynced,
-		workqueue:         workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "Foos"),
-		recorder:          recorder,
+		kubeclientset:        kubeclientset,
+		sampleclientset:      sampleclientset,
+		daemonsetsLister:     daemonSetInformer.Lister(),
+		daemonsetsSynced:     daemonSetInformer.Informer().HasSynced,
+		genericdaemonsLister: genericdaemonInformer.Lister(),
+		genericdaemonsSynced: genericdaemonInformer.Informer().HasSynced,
+		workqueue:            workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "Genericdaemons"),
+		recorder:             recorder,
 	}
 
 	klog.Info("Setting up event handlers")
 	// Set up an event handler for when Foo resources change
-	fooInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: controller.enqueueFoo,
+	genericdaemonInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: controller.enqueueGenericdaemon,
 		UpdateFunc: func(old, new interface{}) {
-			controller.enqueueFoo(new)
+			controller.enqueueGenericdaemon(new)
 		},
 	})
 	// Set up an event handler for when Deployment resources change. This
@@ -126,12 +130,12 @@ func NewController(
 	// processing. This way, we don't need to implement custom logic for
 	// handling Deployment resources. More info on this pattern:
 	// https://github.com/kubernetes/community/blob/8cafef897a22026d42f5e5bb3f104febe7e29830/contributors/devel/controllers.md
-	deploymentInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+	daemonSetInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: controller.handleObject,
 		UpdateFunc: func(old, new interface{}) {
-			newDepl := new.(*appsv1.Deployment)
-			oldDepl := old.(*appsv1.Deployment)
-			if newDepl.ResourceVersion == oldDepl.ResourceVersion {
+			newDaemonset := new.(*appsv1.DaemonSet)
+			oldDaemonset := old.(*appsv1.DaemonSet)
+			if newDaemonset.ResourceVersion == oldDaemonset.ResourceVersion {
 				// Periodic resync will send update events for all known Deployments.
 				// Two different versions of the same Deployment will always have different RVs.
 				return
@@ -153,11 +157,11 @@ func (c *Controller) Run(threadiness int, stopCh <-chan struct{}) error {
 	defer c.workqueue.ShutDown()
 
 	// Start the informer factories to begin populating the informer caches
-	klog.Info("Starting Foo controller")
+	klog.Info("Starting Genericdaemon controller")
 
 	// Wait for the caches to be synced before starting workers
 	klog.Info("Waiting for informer caches to sync")
-	if ok := cache.WaitForCacheSync(stopCh, c.deploymentsSynced, c.foosSynced); !ok {
+	if ok := cache.WaitForCacheSync(stopCh, c.daemonsetsSynced, c.genericdaemonsSynced); !ok {
 		return fmt.Errorf("failed to wait for caches to sync")
 	}
 
@@ -249,32 +253,32 @@ func (c *Controller) syncHandler(key string) error {
 	}
 
 	// Get the Foo resource with this namespace/name
-	foo, err := c.foosLister.Foos(namespace).Get(name)
+	genericdaemon, err := c.genericdaemonsLister.Genericdaemons(namespace).Get(name)
 	if err != nil {
 		// The Foo resource may no longer exist, in which case we stop
 		// processing.
 		if errors.IsNotFound(err) {
-			utilruntime.HandleError(fmt.Errorf("foo '%s' in work queue no longer exists", key))
+			utilruntime.HandleError(fmt.Errorf("genericdaemon '%s' in work queue no longer exists", key))
 			return nil
 		}
 
 		return err
 	}
 
-	deploymentName := foo.Spec.DeploymentName
-	if deploymentName == "" {
+	imageName := genericdaemon.Spec.Image
+	if imageName == "" {
 		// We choose to absorb the error here as the worker would requeue the
 		// resource otherwise. Instead, the next time the resource is updated
 		// the resource will be queued again.
-		utilruntime.HandleError(fmt.Errorf("%s: deployment name must be specified", key))
+		utilruntime.HandleError(fmt.Errorf("%s: image name must be specified", key))
 		return nil
 	}
 
-	// Get the deployment with the name specified in Foo.spec
-	deployment, err := c.deploymentsLister.Deployments(foo.Namespace).Get(deploymentName)
+	// Get the daemonSet with the name specified in Genericdaemon.spec
+	daemonSet, err := c.daemonsetsLister.DaemonSets(genericdaemon.Namespace).Get(imageName)
 	// If the resource doesn't exist, we'll create it
 	if errors.IsNotFound(err) {
-		deployment, err = c.kubeclientset.AppsV1().Deployments(foo.Namespace).Create(newDeployment(foo))
+		daemonSet, err = c.kubeclientset.AppsV1().DaemonSets(genericdaemon.Namespace).Create(newDaemonset(genericdaemon))
 	}
 
 	// If an error occurs during Get/Create, we'll requeue the item so we can
@@ -286,56 +290,57 @@ func (c *Controller) syncHandler(key string) error {
 
 	// If the Deployment is not controlled by this Foo resource, we should log
 	// a warning to the event recorder and ret
-	if !metav1.IsControlledBy(deployment, foo) {
-		msg := fmt.Sprintf(MessageResourceExists, deployment.Name)
-		c.recorder.Event(foo, corev1.EventTypeWarning, ErrResourceExists, msg)
+	if !metav1.IsControlledBy(daemonSet, genericdaemon) {
+		msg := fmt.Sprintf(MessageResourceExists, daemonSet.Name)
+		c.recorder.Event(genericdaemon, corev1.EventTypeWarning, ErrResourceExists, msg)
 		return fmt.Errorf(msg)
 	}
 
 	// If this number of the replicas on the Foo resource is specified, and the
 	// number does not equal the current desired replicas on the Deployment, we
 	// should update the Deployment resource.
-	if foo.Spec.Replicas != nil && *foo.Spec.Replicas != *deployment.Spec.Replicas {
-		klog.V(4).Infof("Foo %s replicas: %d, deployment replicas: %d", name, *foo.Spec.Replicas, *deployment.Spec.Replicas)
-		deployment, err = c.kubeclientset.AppsV1().Deployments(foo.Namespace).Update(newDeployment(foo))
-	}
+	//if genericdaemon.Spec.Replicas != nil && *genericdaemon.Spec.Replicas != *daemonSet.Spec.Replicas {
+	//	klog.V(4).Infof("Foo %s replicas: %d, daemonSet replicas: %d", name, *genericdaemon.Spec.Replicas, *daemonSet.Spec.Replicas)
+	//	daemonSet, err = c.kubeclientset.AppsV1().Deployments(genericdaemon.Namespace).Update(newDeployment(genericdaemon))
+	//}
 
 	// If an error occurs during Update, we'll requeue the item so we can
 	// attempt processing again later. THis could have been caused by a
 	// temporary network failure, or any other transient reason.
-	if err != nil {
-		return err
-	}
+	//if err != nil {
+	//	return err
+	//}
 
 	// Finally, we update the status block of the Foo resource to reflect the
 	// current state of the world
-	err = c.updateFooStatus(foo, deployment)
+	err = c.updateGenericdaemonStatus(genericdaemon, daemonSet)
 	if err != nil {
 		return err
 	}
 
-	c.recorder.Event(foo, corev1.EventTypeNormal, SuccessSynced, MessageResourceSynced)
+	c.recorder.Event(genericdaemon, corev1.EventTypeNormal, SuccessSynced, MessageResourceSynced)
 	return nil
 }
 
-func (c *Controller) updateFooStatus(foo *samplev1alpha1.Foo, deployment *appsv1.Deployment) error {
+func (c *Controller) updateGenericdaemonStatus(genericdaemon *genericdaemonv1beta1.Genericdaemon, daemonSet *appsv1.DaemonSet) error {
 	// NEVER modify objects from the store. It's a read-only, local cache.
 	// You can use DeepCopy() to make a deep copy of original object and modify this copy
 	// Or create a copy manually for better performance
-	fooCopy := foo.DeepCopy()
-	fooCopy.Status.AvailableReplicas = deployment.Status.AvailableReplicas
+	genericdaemonCopy := genericdaemon.DeepCopy()
+	genericdaemonCopy.Status.Installed = daemonSet.Status.NumberReady
+
 	// If the CustomResourceSubresources feature gate is not enabled,
 	// we must use Update instead of UpdateStatus to update the Status block of the Foo resource.
 	// UpdateStatus will not allow changes to the Spec of the resource,
 	// which is ideal for ensuring nothing other than resource status has been updated.
-	_, err := c.sampleclientset.SamplecontrollerV1alpha1().Foos(foo.Namespace).Update(fooCopy)
+	_, err := c.sampleclientset.MydomainV1beta1().Genericdaemons(genericdaemon.Namespace).Update(genericdaemonCopy)
 	return err
 }
 
-// enqueueFoo takes a Foo resource and converts it into a namespace/name
+// enqueueGenericdaemon takes a Foo resource and converts it into a namespace/name
 // string which is then put onto the work queue. This method should *not* be
 // passed resources of any type other than Foo.
-func (c *Controller) enqueueFoo(obj interface{}) {
+func (c *Controller) enqueueGenericdaemon(obj interface{}) {
 	var key string
 	var err error
 	if key, err = cache.MetaNamespaceKeyFunc(obj); err != nil {
@@ -374,13 +379,13 @@ func (c *Controller) handleObject(obj interface{}) {
 			return
 		}
 
-		foo, err := c.foosLister.Foos(object.GetNamespace()).Get(ownerRef.Name)
+		foo, err := c.genericdaemonsLister.Genericdaemons(object.GetNamespace()).Get(ownerRef.Name)
 		if err != nil {
 			klog.V(4).Infof("ignoring orphaned object '%s' of foo '%s'", object.GetSelfLink(), ownerRef.Name)
 			return
 		}
 
-		c.enqueueFoo(foo)
+		c.enqueueGenericdaemon(foo)
 		return
 	}
 }
@@ -388,37 +393,81 @@ func (c *Controller) handleObject(obj interface{}) {
 // newDeployment creates a new Deployment for a Foo resource. It also sets
 // the appropriate OwnerReferences on the resource so handleObject can discover
 // the Foo resource that 'owns' it.
-func newDeployment(foo *samplev1alpha1.Foo) *appsv1.Deployment {
-	labels := map[string]string{
-		"app":        "nginx",
-		"controller": foo.Name,
-	}
-	return &appsv1.Deployment{
+//func newDeployment(foo *genericdaemonv1beta1.Foo) *appsv1.Deployment {
+//	labels := map[string]string{
+//		"app":        "nginx",
+//		"controller": foo.Name,
+//	}
+//	return &appsv1.Deployment{
+//		ObjectMeta: metav1.ObjectMeta{
+//			Name:      foo.Spec.DeploymentName,
+//			Namespace: foo.Namespace,
+//			OwnerReferences: []metav1.OwnerReference{
+//				*metav1.NewControllerRef(foo, schema.GroupVersionKind{
+//					Group:   genericdaemonv1beta1.SchemeGroupVersion.Group,
+//					Version: genericdaemonv1beta1.SchemeGroupVersion.Version,
+//					Kind:    "Foo",
+//				}),
+//			},
+//		},
+//		Spec: appsv1.DeploymentSpec{
+//			Replicas: foo.Spec.Replicas,
+//			Selector: &metav1.LabelSelector{
+//				MatchLabels: labels,
+//			},
+//			Template: corev1.PodTemplateSpec{
+//				ObjectMeta: metav1.ObjectMeta{
+//					Labels: labels,
+//				},
+//				Spec: corev1.PodSpec{
+//					Containers: []corev1.Container{
+//						{
+//							Name:  "nginx",
+//							Image: "nginx:latest",
+//						},
+//					},
+//				},
+//			},
+//		},
+//	}
+//}
+
+func newDaemonset(genericdaemon *genericdaemonv1beta1.Genericdaemon) *appsv1.DaemonSet {
+	nodeSelectorKey := "daemon-" + genericdaemon.Spec.Label
+	nodeSelectorValue := "yes"
+
+	return &appsv1.DaemonSet{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "DaemonSet",
+			APIVersion: "apps/v1",
+		},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      foo.Spec.DeploymentName,
-			Namespace: foo.Namespace,
+			Name:      genericdaemon.Name + "-daemonset",
+			Namespace: genericdaemon.Namespace,
 			OwnerReferences: []metav1.OwnerReference{
-				*metav1.NewControllerRef(foo, schema.GroupVersionKind{
-					Group:   samplev1alpha1.SchemeGroupVersion.Group,
-					Version: samplev1alpha1.SchemeGroupVersion.Version,
-					Kind:    "Foo",
+				*metav1.NewControllerRef(genericdaemon, schema.GroupVersionKind{
+					Group:   genericdaemonv1beta1.SchemeGroupVersion.Group,
+					Version: genericdaemonv1beta1.SchemeGroupVersion.Version,
+					Kind:    "Genericdaemon",
 				}),
 			},
 		},
-		Spec: appsv1.DeploymentSpec{
-			Replicas: foo.Spec.Replicas,
+		Spec: appsv1.DaemonSetSpec{
 			Selector: &metav1.LabelSelector{
-				MatchLabels: labels,
+				MatchLabels: map[string]string{"daemonset": genericdaemon.Name + "-daemonset"},
 			},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: labels,
+					Labels: map[string]string{"daemonset": genericdaemon.Name + "-daemonset"},
 				},
 				Spec: corev1.PodSpec{
+					NodeSelector: map[string]string{
+						nodeSelectorKey: nodeSelectorValue,
+					},
 					Containers: []corev1.Container{
 						{
-							Name:  "nginx",
-							Image: "nginx:latest",
+							Name:  "genericdaemon",
+							Image: genericdaemon.Spec.Image,
 						},
 					},
 				},

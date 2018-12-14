@@ -27,9 +27,9 @@ import (
 	// Uncomment the following line to load the gcp plugin (only required to authenticate against GKE clusters).
 	// _ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
 
-	clientset "k8s.io/sample-controller/pkg/client/clientset/versioned"
-	informers "k8s.io/sample-controller/pkg/client/informers/externalversions"
-	"k8s.io/sample-controller/pkg/signals"
+	clientset "github.com/chanshik/genericdaemon-controller/pkg/client/clientset/versioned"
+	informers "github.com/chanshik/genericdaemon-controller/pkg/client/informers/externalversions"
+	"github.com/chanshik/genericdaemon-controller/pkg/signals"
 )
 
 var (
@@ -38,6 +38,10 @@ var (
 )
 
 func main() {
+	klog.InitFlags(nil)
+
+	flag.Set("logtostderr", "true")
+	flag.Set("alsologtostderr", "true")
 	flag.Parse()
 
 	// set up signals so we handle the first shutdown signal gracefully
@@ -62,8 +66,8 @@ func main() {
 	exampleInformerFactory := informers.NewSharedInformerFactory(exampleClient, time.Second*30)
 
 	controller := NewController(kubeClient, exampleClient,
-		kubeInformerFactory.Apps().V1().Deployments(),
-		exampleInformerFactory.Samplecontroller().V1alpha1().Foos())
+		kubeInformerFactory.Apps().V1().DaemonSets(),
+		exampleInformerFactory.Mydomain().V1beta1().Genericdaemons())
 
 	// notice that there is no need to run Start methods in a separate goroutine. (i.e. go kubeInformerFactory.Start(stopCh)
 	// Start method is non-blocking and runs all registered informers in a dedicated goroutine.

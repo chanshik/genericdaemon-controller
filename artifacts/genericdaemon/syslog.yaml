@@ -1,0 +1,7 @@
+apiVersion: mydomain.com/v1beta1
+kind: Genericdaemon
+metadata:
+  name: syslog
+spec:
+  image: mbessler/syslogdocker
+  label: logs
